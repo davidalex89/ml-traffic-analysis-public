@@ -7,7 +7,7 @@ of SEC595 (Applied Data Science & ML for Cybersecurity Professionals) concepts.
 
 A scheduled pipeline that:
 
-1. **Collects** traffic analytics from Cloudflare's GraphQL API (hourly HTTP stats,
+1. **Collects** traffic analytics from Cloudflare's GraphQL API (4x/day HTTP stats,
    firewall events, request patterns)
 2. **Stores** accumulated data in a local SQLite database, building a growing dataset
    over time
