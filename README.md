@@ -25,14 +25,10 @@ A scheduled pipeline that:
 pip install -r requirements.txt
 
 # Set up credentials (create these files in project root)
-# [cloudflare token]  — your Cloudflare API token (Analytics Read permission) - store/process securely/GH secrets
-# [cloudflare zone]   — your Cloudflare Zone ID
 
 # Verify your token works
-python run.py verify
 
 # Run the full pipeline
-python run.py
 
 # Or run individual stages
 python run.py collect     # only pull data from Cloudflare
