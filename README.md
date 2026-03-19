@@ -24,7 +24,7 @@ A scheduled pipeline that:
 # Install dependencies
 pip install -r requirements.txt
 
-# Set up credentials (create these files in project root)
+# Set up credentials (and store them securely)
 
 # Verify your token works
 
