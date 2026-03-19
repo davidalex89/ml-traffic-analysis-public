@@ -44,10 +44,10 @@ The included workflow (`.github/workflows/collect.yml`) runs the pipeline hourly
 accumulating data over time. Set these GitHub repository secrets:
 
 - `CF_API_TOKEN` — Cloudflare API token
-- `CF_ZONE_ID` — Cloudflare Zone ID for hiredavid.com
+- `CF_ZONE_ID` — Cloudflare Zone ID
 
 The workflow persists the SQLite database as a GitHub Actions artifact and commits
-the updated dashboard to `docs/index.html` (which can be served via GitHub Pages).
+the updated dashboard to `docs/index.html` (which can be served via GitHub Pages or elsewhere).
 
 ## Project Structure
 
