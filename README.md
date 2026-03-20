@@ -1,4 +1,6 @@
-# ML Traffic Analysis for hiredavid.com
+# ML Traffic Analysis for a cloudflare-protect website
+
+Note: I use this for my personal site hiredavid.com, but it can easily be repurposed.
 
 Machine learning applied to real Cloudflare traffic data — a practical application
 of SEC595 (Applied Data Science & ML for Cybersecurity Professionals) concepts.
