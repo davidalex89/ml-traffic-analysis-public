@@ -76,15 +76,27 @@ class TrafficAnalyzer:
             cluster_profiles.append(profile)
 
         cluster_profiles.sort(key=lambda x: x["avg_requests"], reverse=True)
+        used_labels = set()
         for i, p in enumerate(cluster_profiles):
-            if p["threat_ratio"] > 0.1:
-                p["label"] = "Suspicious Traffic"
-            elif p["avg_requests"] > df["request_count"].quantile(0.75):
-                p["label"] = "High-Volume Visitors"
+            top_country = list(p["top_countries"].keys())[0] if p["top_countries"] else "Unknown"
+            if p["threat_ratio"] > 0.1 and "Suspicious Traffic" not in used_labels:
+                label = "Suspicious Traffic"
+            elif p["threat_ratio"] > 0.05 and "Elevated Threat" not in used_labels:
+                label = "Elevated Threat"
+            elif p["avg_requests"] > df["request_count"].quantile(0.9) and "High-Volume Visitors" not in used_labels:
+                label = "High-Volume Visitors"
+            elif p["avg_requests"] > df["request_count"].quantile(0.5) and "Moderate Traffic" not in used_labels:
+                label = "Moderate Traffic"
             elif len(p["top_countries"]) == 1:
-                p["label"] = f"Concentrated ({list(p['top_countries'].keys())[0]})"
+                label = f"Concentrated ({top_country})"
+            elif p["avg_requests"] <= df["request_count"].quantile(0.25) and "Low-Volume / Crawlers" not in used_labels:
+                label = "Low-Volume / Crawlers"
             else:
-                p["label"] = f"Cluster {i + 1}"
+                label = f"Regional Mix ({top_country})"
+            if label in used_labels:
+                label = f"{label} — {top_country}"
+            used_labels.add(label)
+            p["label"] = label
 
         result = {
             "n_clusters": n_clusters,

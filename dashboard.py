@@ -15,6 +15,7 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ML Traffic Analysis | hiredavid.com</title>
+    <link rel="icon" type="image/png" href="https://hiredavid.com/favicon.png">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
     <style>
         :root {
@@ -146,7 +147,10 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
             position: relative;
             height: 300px;
             width: 100%;
+            max-width: 100%;
         }
+
+        .section { overflow: hidden; }
 
         .grid-2 {
             display: grid;
@@ -182,15 +186,22 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
         .cluster-meta .cm-label { color: var(--text-secondary); }
         .cluster-meta .cm-value { font-weight: 600; }
 
+        .table-wrap {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
         table {
             width: 100%;
             border-collapse: collapse;
             font-size: 0.85rem;
+            min-width: 500px;
         }
 
         th, td {
             text-align: left;
             padding: 0.6rem 0.75rem;
+            white-space: nowrap;
             border-bottom: 1px solid var(--border);
         }
 
@@ -425,6 +436,7 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                 &plusmn; {{ "%.0f"|format(anomalies.baseline_std_requests) }}).
             </p>
             {% if anomalies and anomalies.anomalies %}
+            <div class="table-wrap">
             <table>
                 <thead>
                     <tr>
@@ -449,6 +461,7 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
             {% else %}
             <div class="empty-state">
                 <p>No anomalies detected{% if anomalies %} across {{ anomalies.total_buckets_analyzed }} time buckets{% endif %}.</p>
@@ -695,7 +708,7 @@ def generate_dashboard():
         generated_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
     )
 
-    out_path = OUTPUT_DIR / "ml_traffic_analysis.html"
+    out_path = OUTPUT_DIR / "index.html"
     out_path.write_text(html, encoding="utf-8")
     log.info("Dashboard written to %s", out_path)
     return out_path
