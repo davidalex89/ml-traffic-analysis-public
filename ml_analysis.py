@@ -1,6 +1,7 @@
 import json
 import logging
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
@@ -9,6 +10,8 @@ from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 from storage import get_db, query_all, insert_ml_result
+
+ANALYSIS_WINDOW_DAYS = 7
 
 log = logging.getLogger(__name__)
 
@@ -76,26 +79,27 @@ class TrafficAnalyzer:
             cluster_profiles.append(profile)
 
         cluster_profiles.sort(key=lambda x: x["avg_requests"], reverse=True)
-        used_labels = set()
+        used_bases = set()
         for i, p in enumerate(cluster_profiles):
             top_country = list(p["top_countries"].keys())[0] if p["top_countries"] else "Unknown"
-            if p["threat_ratio"] > 0.1 and "Suspicious Traffic" not in used_labels:
-                label = "Suspicious Traffic"
-            elif p["threat_ratio"] > 0.05 and "Elevated Threat" not in used_labels:
-                label = "Elevated Threat"
-            elif p["avg_requests"] > df["request_count"].quantile(0.9) and "High-Volume Visitors" not in used_labels:
-                label = "High-Volume Visitors"
-            elif p["avg_requests"] > df["request_count"].quantile(0.5) and "Moderate Traffic" not in used_labels:
-                label = "Moderate Traffic"
-            elif len(p["top_countries"]) == 1:
-                label = f"Concentrated ({top_country})"
-            elif p["avg_requests"] <= df["request_count"].quantile(0.25) and "Low-Volume / Crawlers" not in used_labels:
-                label = "Low-Volume / Crawlers"
+            if p["threat_ratio"] > 0.1 and "Suspicious Traffic" not in used_bases:
+                base = "Suspicious Traffic"
+            elif p["threat_ratio"] > 0.05 and "Elevated Threat" not in used_bases:
+                base = "Elevated Threat"
+            elif p["avg_requests"] > df["request_count"].quantile(0.9) and "High-Volume Visitors" not in used_bases:
+                base = "High-Volume Visitors"
+            elif p["avg_requests"] > df["request_count"].quantile(0.5) and "Moderate Traffic" not in used_bases:
+                base = "Moderate Traffic"
+            elif p["avg_requests"] <= df["request_count"].quantile(0.25) and "Low-Volume / Crawlers" not in used_bases:
+                base = "Low-Volume / Crawlers"
             else:
-                label = f"Regional Mix ({top_country})"
-            if label in used_labels:
-                label = f"{label} — {top_country}"
-            used_labels.add(label)
+                base = "Mixed Traffic"
+
+            if base in used_bases:
+                label = f"{base} ({top_country})"
+            else:
+                label = base
+            used_bases.add(base)
             p["label"] = label
 
         result = {
@@ -109,6 +113,7 @@ class TrafficAnalyzer:
 
     def _detect_anomalies(self, conn):
         """Isolation Forest on hourly request volumes to flag unusual traffic."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=ANALYSIS_WINDOW_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
         rows = query_all(conn, """
             SELECT bucket,
                    SUM(request_count) as total_requests,
@@ -116,9 +121,10 @@ class TrafficAnalyzer:
                    SUM(threats) as total_threats,
                    COUNT(DISTINCT country) as unique_countries
             FROM hourly_traffic
+            WHERE bucket >= ?
             GROUP BY bucket
             ORDER BY bucket
-        """)
+        """, (cutoff,))
         if len(rows) < self.min_rows:
             log.info("Not enough hourly buckets for anomaly detection (%d)", len(rows))
             return
@@ -201,11 +207,13 @@ class TrafficAnalyzer:
 
     def _analyze_firewall_events(self, conn):
         """Breakdown of firewall events by action, source, country, and path."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=ANALYSIS_WINDOW_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
         rows = query_all(conn, """
             SELECT action, country, source, request_path, http_method, user_agent
             FROM firewall_events
+            WHERE event_datetime >= ?
             ORDER BY event_datetime DESC
-        """)
+        """, (cutoff,))
         if not rows:
             log.info("No firewall events to analyze")
             insert_ml_result(conn, "firewall_analysis", "event_breakdown", json.dumps({

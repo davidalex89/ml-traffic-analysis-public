@@ -1,6 +1,6 @@
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 
 from config import DB_PATH
 
@@ -79,6 +79,35 @@ def get_db():
 def init_db():
     with get_db() as conn:
         conn.executescript(SCHEMA)
+        _deduplicate_hourly_traffic(conn)
+
+
+def _deduplicate_hourly_traffic(conn):
+    """Remove duplicate rows caused by NULL values in the old UNIQUE constraint."""
+    dupes = conn.execute("""
+        SELECT bucket, country, COUNT(*) as cnt
+        FROM hourly_traffic
+        GROUP BY bucket, COALESCE(country, ''), COALESCE(http_method, ''), COALESCE(status_code, 0)
+        HAVING cnt > 1
+    """).fetchall()
+    if not dupes:
+        return
+    conn.execute("""
+        DELETE FROM hourly_traffic
+        WHERE id NOT IN (
+            SELECT MIN(id)
+            FROM hourly_traffic
+            GROUP BY bucket, COALESCE(country, ''), COALESCE(http_method, ''), COALESCE(status_code, 0)
+        )
+    """)
+    conn.execute("""
+        UPDATE hourly_traffic
+        SET http_method = COALESCE(http_method, ''),
+            status_code = COALESCE(status_code, 0),
+            country = COALESCE(country, 'Unknown'),
+            content_type = COALESCE(content_type, '')
+        WHERE http_method IS NULL OR status_code IS NULL OR country IS NULL OR content_type IS NULL
+    """)
 
 
 def insert_hourly_traffic(conn, rows: list[dict]):
@@ -119,7 +148,7 @@ def insert_ml_result(conn, model_name: str, result_type: str, result_json: str):
     conn.execute(
         """INSERT INTO ml_results (run_at, model_name, result_type, result_json)
            VALUES (?, ?, ?, ?)""",
-        (datetime.utcnow().isoformat(), model_name, result_type, result_json),
+        (datetime.now(timezone.utc).isoformat(), model_name, result_type, result_json),
     )
 
 

@@ -1,11 +1,21 @@
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from jinja2 import Template
 
 from config import OUTPUT_DIR
+from ml_analysis import ANALYSIS_WINDOW_DAYS
 from storage import get_db, query_all
+
+
+def _format_bucket(iso_bucket: str) -> str:
+    """Turn '2026-03-18T22:00:00Z' into 'Mar 18, 10:00 PM UTC'."""
+    try:
+        dt = datetime.strptime(iso_bucket, "%Y-%m-%dT%H:%M:%SZ")
+        return dt.strftime("%b %-d, %-I:%M %p UTC")
+    except (ValueError, TypeError):
+        return iso_bucket
 
 log = logging.getLogger(__name__)
 
@@ -287,79 +297,86 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
             </p>
             <ul style="color: var(--text-secondary); font-size: 0.9rem; line-height: 2; margin-top: 0.5rem; padding-left: 1.5rem;">
                 <li><strong style="color: var(--text-primary);">K-Means Clustering</strong> &mdash;
-                    an unsupervised algorithm that groups traffic into distinct patterns without being told
-                    what to look for. It discovers "visitor personas" on its own by analyzing features like
-                    geographic origin, request volume, and threat indicators. This is useful because you
-                    don't need labeled data &mdash; the model finds structure in raw traffic.</li>
+                    an unsupervised algorithm that groups traffic into distinct patterns. We tell it which
+                    features to analyze &mdash; geographic origin, request volume, bandwidth, and Cloudflare's
+                    threat flags &mdash; but not how to group them. It discovers "visitor personas" on its own
+                    by finding natural clusters in the data. No pre-classified training examples are needed;
+                    the algorithm learns structure from the feature space itself.</li>
                 <li><strong style="color: var(--text-primary);">Isolation Forest</strong> &mdash;
                     an anomaly detection algorithm that learns what "normal" traffic looks like, then flags
                     time periods that deviate significantly from that baseline. Rather than relying on
                     predefined rules, it adapts to the actual patterns of this specific site.</li>
             </ul>
             <p style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.8; margin-top: 0.75rem;">
-                A scheduled pipeline collects traffic analytics from Cloudflare's API every hour, accumulates
-                the data over time, retrains the models, and regenerates this page automatically.
-                The more data it collects, the smarter the models get.
+                A scheduled pipeline collects traffic analytics from Cloudflare's API every six hours, accumulates
+                the data over time, retrains the models, and regenerates this page automagically.
+                More accumulated history improves cluster quality; continuous collection keeps the
+                anomaly detection window free of gaps.
             </p>
-            {% if summary.latest_data %}
             <p style="color: var(--text-secondary); font-size: 0.8rem; margin-top: 1rem;">
-                Last updated: <strong style="color: var(--accent-blue);">{{ summary.latest_data }}</strong>
+                Dashboard generated: <strong style="color: var(--accent-blue);">{{ generated_at }}</strong>
+                {% if summary.latest_data %}
+                &nbsp;|&nbsp; Data through: {{ summary.latest_data_display }}
+                {% endif %}
             </p>
-            {% endif %}
+            <p style="color: var(--text-secondary); font-size: 0.75rem; margin-top: 0.35rem; font-style: italic;">
+                Summary statistics reflect all data since monitoring began.
+                Traffic charts and detailed analysis use a rolling {{ analysis_window_days }}-day window.
+            </p>
         </div>
 
-        <!-- Summary Stats -->
+        <!-- Summary Stats (all-time cumulative) -->
         <div class="stats-grid">
             <div class="stat-card">
                 <div class="label">Total Requests</div>
                 <div class="value">{{ "{:,}".format(summary.total_requests) }}</div>
-                <div class="sub">across all collected periods</div>
+                <div class="sub">all-time, since monitoring began</div>
             </div>
             <div class="stat-card">
                 <div class="label">Unique Countries</div>
                 <div class="value">{{ summary.unique_countries }}</div>
-                <div class="sub">sources of traffic</div>
+                <div class="sub">all-time traffic sources</div>
             </div>
             <div class="stat-card">
                 <div class="label">Threats Detected</div>
                 <div class="value" style="color: var(--accent-red)">{{ "{:,}".format(summary.total_threats) }}</div>
-                <div class="sub">flagged by Cloudflare</div>
+                <div class="sub">all-time, flagged by Cloudflare</div>
             </div>
             <div class="stat-card">
                 <div class="label">Firewall Events</div>
                 <div class="value" style="color: var(--accent-amber)">{{ "{:,}".format(summary.firewall_events) }}</div>
-                <div class="sub">security-related events</div>
+                <div class="sub">all-time WAF events captured</div>
             </div>
             <div class="stat-card">
                 <div class="label">Data Points</div>
                 <div class="value" style="color: var(--accent-purple)">{{ "{:,}".format(summary.data_rows) }}</div>
-                <div class="sub">rows in training set</div>
+                <div class="sub">hourly traffic records collected</div>
             </div>
         </div>
 
-        <!-- Traffic Over Time -->
+        <!-- Traffic Over Time (rolling window) -->
         <div class="section">
             <h2>Traffic Volume Over Time</h2>
-            <p class="description">Hourly request counts with anomalies highlighted in red</p>
+            <p class="description">Hourly request counts from the last {{ analysis_window_days }} days. Hours flagged as anomalous by the Isolation Forest model are highlighted in red.</p>
             <div class="chart-container">
                 <canvas id="trafficChart"></canvas>
             </div>
         </div>
 
         <div class="grid-2">
-            <!-- Country Distribution -->
+            <!-- Country Distribution (all-time) -->
             <div class="section">
                 <h2>Top Countries by Requests</h2>
-                <p class="description">Geographic distribution of traffic sources</p>
+                <p class="description">Geographic distribution of all traffic sources since monitoring began</p>
                 <div class="chart-container">
                     <canvas id="countryChart"></canvas>
                 </div>
             </div>
 
-            <!-- Threat by Country -->
+            <!-- Threat by Country (all-time) -->
             <div class="section">
                 <h2>Threat Ratio by Country</h2>
-                <p class="description">Percentage of requests flagged as threats per country</p>
+                <p class="description">Percentage of requests flagged as threats per country, cumulative since monitoring began</p>
                 <div class="chart-container">
                     <canvas id="threatChart"></canvas>
                 </div>
@@ -370,9 +387,9 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
         <div class="section">
             <h2>Visitor Cluster Analysis <span class="badge badge-blue">K-Means</span></h2>
             <p class="description">
-                Traffic patterns grouped using K-Means clustering on features:
-                country, request volume, bandwidth, and threat count.
-                Each cluster represents a distinct "visitor persona."
+                Trained on all accumulated traffic data ({{ clusters.total_rows_analyzed if clusters and clusters.total_rows_analyzed else 0 }} rows)
+                to discover visitor "personas." Features: country, request volume, bandwidth, and threat count.
+                More historical data improves cluster quality, so this model uses the full dataset &mdash; not just the rolling window.
             </p>
             {% if clusters and clusters.profiles %}
             <div class="grid-2">
@@ -430,10 +447,12 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
         <div class="section">
             <h2>Anomaly Detection <span class="badge badge-red">Isolation Forest</span></h2>
             <p class="description">
-                Hourly traffic buckets scored by an Isolation Forest model.
-                Anomalies are time periods where traffic patterns deviate significantly
-                from the learned baseline ({{ "%.0f"|format(anomalies.baseline_mean_requests) }} avg requests/hr
+                The Isolation Forest model analyzes the last {{ analysis_window_days }} days of hourly traffic
+                ({{ anomalies.total_buckets_analyzed }} buckets) to learn what "normal" looks like, then flags
+                hours that deviate significantly from the baseline
+                ({{ "%.0f"|format(anomalies.baseline_mean_requests) }} avg requests/hr
                 &plusmn; {{ "%.0f"|format(anomalies.baseline_std_requests) }}).
+                Only flagged anomalies appear below &mdash; if the table is empty, all traffic was within normal bounds.
             </p>
             {% if anomalies and anomalies.anomalies %}
             <div class="table-wrap">
@@ -451,7 +470,7 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
                 <tbody>
                     {% for a in anomalies.anomalies %}
                     <tr class="anomaly-row">
-                        <td>{{ a.bucket }}</td>
+                        <td>{{ a.bucket_display }}</td>
                         <td>{{ "{:,}".format(a.total_requests) }}</td>
                         <td>{{ "%.1f"|format(a.total_bytes / 1024 / 1024) }} MB</td>
                         <td style="color: var(--accent-red)">{{ a.total_threats }}</td>
@@ -470,10 +489,10 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
             {% endif %}
         </div>
 
-        <!-- Firewall Events -->
+        <!-- Firewall Events (rolling window) -->
         <div class="section">
             <h2>Firewall Event Breakdown</h2>
-            <p class="description">Security events captured by Cloudflare WAF (sampled, last 24h window on free plan)</p>
+            <p class="description">WAF security events from the last {{ analysis_window_days }} days, collected from Cloudflare's API (sampled; each collection captures up to 24 hours on the free plan)</p>
             {% if firewall and firewall.total_events > 0 %}
             <div>
                 <h3 style="font-size:0.85rem; margin-bottom:0.75rem; color:var(--text-secondary)">BY ACTION</h3>
@@ -483,8 +502,8 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
             </div>
             {% else %}
             <div class="empty-state">
-                <p>No firewall events recorded in the current window.</p>
-                <p>Events are sampled and only cover the last 24 hours on the free plan.</p>
+                <p>No firewall events recorded in the last {{ analysis_window_days }} days.</p>
+                <p>Cloudflare samples these events; gaps are expected on the free plan.</p>
             </div>
             {% endif %}
         </div>
@@ -519,7 +538,15 @@ DASHBOARD_TEMPLATE = r"""<!DOCTYPE html>
         new Chart(document.getElementById('trafficChart'), {
             type: 'bar',
             data: {
-                labels: trafficData.map(d => d.bucket.replace('T', ' ').substring(5, 16)),
+                labels: trafficData.map(d => {
+                    const dt = new Date(d.bucket);
+                    const mon = dt.toLocaleString('en-US', {month:'short', timeZone:'UTC'});
+                    const day = dt.getUTCDate();
+                    const hr = dt.getUTCHours();
+                    const ampm = hr >= 12 ? 'PM' : 'AM';
+                    const h12 = hr % 12 || 12;
+                    return mon + ' ' + day + ', ' + h12 + ampm;
+                }),
                 datasets: [{
                     label: 'Requests',
                     data: trafficData.map(d => d.total_requests),
@@ -671,12 +698,14 @@ def generate_dashboard():
         countries = _get_latest_result(conn, "geo_analysis")
         firewall = _get_latest_result(conn, "firewall_analysis")
 
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=ANALYSIS_WINDOW_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
         traffic_ts = query_all(conn, """
             SELECT bucket, SUM(request_count) as total_requests
             FROM hourly_traffic
+            WHERE bucket >= ?
             GROUP BY bucket
             ORDER BY bucket
-        """)
+        """, (cutoff,))
 
     if not summary:
         summary = {
@@ -689,10 +718,15 @@ def generate_dashboard():
             "baseline_std_requests": 0, "total_buckets_analyzed": 0,
         }
 
+    for a in anomalies.get("anomalies", []):
+        a["bucket_display"] = _format_bucket(a["bucket"])
     anomaly_buckets = [a["bucket"] for a in anomalies.get("anomalies", [])]
     country_data = countries.get("countries", [])
     cluster_chart = clusters.get("profiles", []) if clusters else []
     fw_actions = firewall.get("by_action", {}) if firewall else {}
+
+    summary["latest_data_display"] = _format_bucket(summary.get("latest_data", "")) if summary.get("latest_data") else ""
+    summary["earliest_data_display"] = _format_bucket(summary.get("earliest_data", "")) if summary.get("earliest_data") else ""
 
     template = Template(DASHBOARD_TEMPLATE)
     html = template.render(
@@ -705,7 +739,8 @@ def generate_dashboard():
         country_data=country_data,
         cluster_chart_data=cluster_chart,
         fw_actions=fw_actions,
-        generated_at=datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+        analysis_window_days=ANALYSIS_WINDOW_DAYS,
+        generated_at=datetime.now(timezone.utc).strftime("%b %-d, %Y %-I:%M %p UTC"),
     )
 
     out_path = OUTPUT_DIR / "index.html"

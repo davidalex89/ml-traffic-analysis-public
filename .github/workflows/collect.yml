@@ -1,0 +1,62 @@
+name: ML Traffic Analysis Pipeline
+
+on:
+  schedule:
+    # Run every 6 hours
+    - cron: '15 */6 * * *'
+  workflow_dispatch:
+    # Allow manual trigger from GitHub UI
+
+permissions:
+  contents: write
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore data directory
+        run: mkdir -p data output
+
+      - name: Restore database from cache
+        uses: actions/cache@v5
+        with:
+          path: data/traffic.db
+          key: traffic-db-${{ github.run_id }}
+          restore-keys: |
+            traffic-db-
+
+      - name: Run pipeline
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+        run: python run.py
+
+      # --- Deploy step (customize for your setup) ---
+      # Option A: FTP deploy
+      # - name: Deploy via FTP
+      #   uses: SamKirkland/FTP-Deploy-Action@v4.3.6
+      #   with:
+      #     server: ${{ secrets.FTP_SERVER }}
+      #     username: ${{ secrets.FTP_USERNAME }}
+      #     password: ${{ secrets.FTP_PASSWORD }}
+      #     local-dir: ./output/
+      #     server-dir: /
+
+      # Option B: Commit to repo (e.g. for GitHub Pages)
+      - name: Commit updated dashboard
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add output/
+          git diff --cached --quiet || git commit -m "Update ML dashboard $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push
