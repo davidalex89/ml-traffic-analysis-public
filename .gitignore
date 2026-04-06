@@ -1,8 +1,20 @@
 # Secrets - NEVER commit these
+<<<<<<< HEAD
 analytics_ml.txt
 .env
 *.secret
 
+=======
+*.token
+*.zone
+*_token.txt
+*_zone.txt
+analytics_ml.txt
+.env
+*.secret
+api_keys/
+keys/
+>>>>>>> d934d17 (Generalize secret file patterns in .gitignore)
 
 # Data files (accumulated locally, can be large)
 data/*.db
