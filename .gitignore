@@ -1,10 +1,8 @@
 # Secrets - NEVER commit these
-cf_token.txt
-cf_zone.txt
 analytics_ml.txt
 .env
 *.secret
-namecheap_keys/
+
 
 # Data files (accumulated locally, can be large)
 data/*.db
