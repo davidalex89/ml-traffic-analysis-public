@@ -1,0 +1,151 @@
+#!/bin/bash
+# Refuse commits that stage a credential.
+#
+# .gitignore is the first line of defence, but it only helps for paths someone
+# thought of in advance — cf_account_id.txt reached the repo because the ignore
+# list was an inventory of known-bad filenames and nobody extended it. This runs
+# against what is actually staged, so a new file has to clear it on its merits.
+#
+# Bypass with `git commit --no-verify` when you genuinely mean it.
+
+set -uo pipefail
+
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+fail=0
+note() { echo "  $*" >&2; }
+
+# ── 1. Filenames that are credentials by convention ──────────────────────────
+# Anchored on the whole path so a legitimate name like requirements.txt does
+# not trip it.
+name_pattern='(^|/)(\.env(\..*)?|.*_token.*\.txt|cf_.*\.txt|ftp_.*\.txt|.*secret.*|.*password.*|.*credential.*|.*\.pem|.*\.p12|.*\.pfx|id_rsa|id_ed25519)$'
+
+while IFS= read -r f; do
+    if [[ "$f" =~ $name_pattern ]]; then
+        [ $fail -eq 0 ] && echo "" >&2 && echo "BLOCKED — credential file staged:" >&2
+        note "$f"
+        fail=1
+    fi
+done <<< "$staged"
+
+# ── 2. Secret-shaped content ─────────────────────────────────────────────────
+# Deliberately narrow. Vendored and minified files are skipped outright: a
+# 208 KB minified bundle is wall-to-wall long alphanumeric strings, and a
+# scanner that cries wolf on every deploy is a scanner people disable.
+#
+# Documentation placeholders are filtered out for that same reason. README's
+# `export CF_API_TOKEN="your-cloudflare-api-token"` is 25 characters of
+# [A-Za-z0-9_-], so it cleared the {24,} threshold and blocked every commit that
+# touched the README — training exactly the --no-verify habit this hook exists
+# to avoid.
+content_hits=""
+while IFS= read -r f; do
+    case "$f" in
+        */lib/*|*.min.js|*.min.css|*.map|*.woff2|*.png|*.jpg|*.mp4|*.db) continue ;;
+    esac
+    [ -f "$f" ] || continue
+    [ "$(wc -c < "$f")" -gt 2000000 ] && continue
+
+    hit=$(git show ":$f" 2>/dev/null | grep -nEi \
+        -e '-----BEGIN [A-Z ]*PRIVATE KEY-----' \
+        -e 'AKIA[0-9A-Z]{16}' \
+        -e 'gh[pousr]_[A-Za-z0-9]{30,}' \
+        -e '(authorization:[[:space:]]*bearer|api[_-]?key|secret|passwd|password|token)[[:space:]]*[=:][[:space:]]*["'"'"'][A-Za-z0-9_\-]{24,}["'"'"']' \
+        | grep -viE 'your[-_]|my[-_]|example|sample|placeholder|changeme|dummy|redacted|xxx+|<[a-z_-]+>' \
+        | head -3)
+    if [ -n "$hit" ]; then
+        content_hits="${content_hits}${f}\n$(echo "$hit" | sed 's/^/    /')\n"
+    fi
+done <<< "$staged"
+
+if [ -n "$content_hits" ]; then
+    [ $fail -eq 0 ] && echo "" >&2
+    echo "BLOCKED — secret-shaped content staged:" >&2
+    printf "%b" "$content_hits" >&2
+    fail=1
+fi
+
+# ── 3. Private-site identity ─────────────────────────────────────────────────
+# This repo is a public mirror of a private pipeline, so the likeliest leak is
+# not a credential at all — it is a domain name, a deploy path, or an author
+# name riding along in a comment. Rules 1 and 2 say nothing about any of those.
+#
+# NOTHING is hardcoded here. Every pattern comes from .identity-denylist, which
+# is gitignored — so this file guards your identity without publishing it.
+#
+# This used to hardcode the original author's domains and name, on the reasoning
+# that they were public websites and naming them revealed nothing. That is true
+# as far as it goes, but it made a public, forkable repository carry a list of
+# one person's identifiers for no benefit to anyone who forked it — the fork
+# inherits patterns it will never match and none of its own. Whoever runs the
+# repo is the only one who knows what their denylist should contain.
+#
+# Origin IPs, zone IDs and account IDs were already kept out of this file for a
+# stronger reason, and it still applies: writing them here would publish them —
+# a denylist that leaks the thing it guards. Cloudflare-proxied origin IPs
+# especially, since exposing one invites a direct-to-origin request that
+# bypasses the WAF entirely.
+#
+# Create .identity-denylist in the project root, one extended-regex per line:
+#
+#   your-domain\.com
+#   your-other-domain\.com
+#   Your Name
+#   203\.0\.113\.7
+#
+# With no such file this section is inert and the hook still enforces rules 1
+# and 2 above.
+identity_pattern=''
+
+identity_hits=""
+# Guard both sources. An empty $identity_pattern must mean "check nothing" —
+# `grep -E ''` matches EVERY line, so passing it through unguarded would block
+# every commit and read as the hook being broken rather than unconfigured.
+# Same for an absent or empty .identity-denylist, which `grep -f` treats the
+# same way.
+if [ -n "$identity_pattern" ] || [ -s .identity-denylist ]; then
+while IFS= read -r f; do
+    case "$f" in
+        # LICENSE carries the author's name by design, and this hook may contain
+        # patterns itself. Both would flag on every commit.
+        LICENSE|.githooks/pre-commit) continue ;;
+        */lib/*|*.min.js|*.min.css|*.map|*.woff2|*.png|*.jpg|*.mp4|*.db) continue ;;
+    esac
+    [ -f "$f" ] || continue
+    [ "$(wc -c < "$f")" -gt 2000000 ] && continue
+
+    hit=""
+    if [ -n "$identity_pattern" ]; then
+        hit=$(git show ":$f" 2>/dev/null | grep -nEi "$identity_pattern" | head -3)
+    fi
+    if [ -s .identity-denylist ]; then
+        extra=$(git show ":$f" 2>/dev/null | grep -nEi -f .identity-denylist | head -3)
+        [ -n "$extra" ] && hit=$(printf '%s\n%s' "$hit" "$extra" | grep -v '^[[:space:]]*$')
+    fi
+    if [ -n "$hit" ]; then
+        identity_hits="${identity_hits}${f}\n$(echo "$hit" | sed 's/^/    /')\n"
+    fi
+done <<< "$staged"
+fi
+
+if [ -n "$identity_hits" ]; then
+    [ $fail -eq 0 ] && echo "" >&2
+    echo "BLOCKED — private-site identity staged:" >&2
+    printf "%b" "$identity_hits" >&2
+    fail=1
+fi
+
+if [ $fail -ne 0 ]; then
+    cat >&2 <<'EOF'
+
+Nothing has been committed. Either:
+  - move the value to an environment variable or an ignored file,
+  - generalise the identity (site name / URL belong in config, not in source), or
+  - if this is a false positive, commit with --no-verify
+
+EOF
+    exit 1
+fi
+
+exit 0

@@ -1,0 +1,138 @@
+name: ML Traffic Analysis Pipeline
+
+on:
+  # Manual trigger only. There is deliberately NO `schedule:` here.
+  #
+  # This repository is a reference implementation, not a running deployment.
+  # A cron trigger fires on every fork and on this repo whether or not anyone
+  # configured a zone — consuming Actions minutes on an account that gets
+  # nothing back, because with no CF_API_TOKEN the pipeline collects nothing
+  # and commits nothing. It ran unnoticed here until it showed up against an
+  # Actions quota.
+  #
+  # To run this against your own zone on a schedule, add the two lines below
+  # back in your own fork, after setting the CF_API_TOKEN and CF_ZONE_ID
+  # secrets. Match config.py's SLOT_HOURS to whatever interval you choose:
+  #
+  #   schedule:
+  #     - cron: '15 */12 * * *'   # every 12 hours
+  #
+  # Note that GitHub disables a scheduled workflow after 60 days of repository
+  # inactivity; the run-history commit below is what keeps it alive.
+  workflow_dispatch:
+    # Allow manual trigger from GitHub UI
+
+permissions:
+  contents: write
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    # Job level, not step level: a step's own `env:` is not in scope for that
+    # step's `if:` — GitHub evaluates the condition first — so a guard defined
+    # alongside the step it guards silently never fires.
+    env:
+      HAS_ZONE: ${{ secrets.CF_ZONE_ID != '' && secrets.CF_API_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch Chart.js
+        # lib/ is gitignored, so the runner has no copy. Without this the
+        # deployed page would reference a chart bundle that 404s.
+        run: python vendor_chartjs.py
+
+      - name: Restore data directory
+        run: mkdir -p data output
+
+      - name: Restore database from cache
+        uses: actions/cache@v5
+        with:
+          path: data/traffic.db
+          key: traffic-db-${{ github.run_id }}
+          restore-keys: |
+            traffic-db-
+
+      - name: Record database provenance
+        # pipeline_v2 stores this on every run. A silent cache eviction resets
+        # every longitudinal series the dashboard reports — calibration streaks,
+        # run counts — and without recording where the database came from, that
+        # reset looks like a genuine change in the traffic.
+        run: |
+          if [ -s data/traffic.db ]; then SRC=cache; else SRC=fresh; fi
+          echo "ML_DB_SOURCE=$SRC" >> "$GITHUB_ENV"
+          echo "::notice::Database source: $SRC"
+
+      - name: Report configuration state
+        # A fork with no zone configured should say so once, plainly, rather
+        # than leaving someone to infer it from a stack trace.
+        run: |
+          if [ "${HAS_ZONE}" = "true" ]; then
+            echo "::notice::CF_API_TOKEN and CF_ZONE_ID are set — collecting live data"
+          else
+            echo "::notice::No Cloudflare credentials configured. The pipeline will run against whatever is cached and will not append history. Set the CF_API_TOKEN and CF_ZONE_ID secrets to collect live data; see the README."
+          fi
+
+      - name: Run pipeline
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          DASHBOARD_SITE_URL: ${{ vars.DASHBOARD_SITE_URL }}
+          DASHBOARD_SITE_NAME: ${{ vars.DASHBOARD_SITE_NAME }}
+          ML_EXCLUDED_IPS: ${{ vars.ML_EXCLUDED_IPS }}
+          ML_DB_SOURCE: ${{ env.ML_DB_SOURCE }}
+        run: python run.py
+
+      # --- Deploy (customize for your setup) ---
+      # Option A: FTP — use SamKirkland/FTP-Deploy-Action or curl/netrc upload of output/*
+      # Option B: GitHub Pages — commit output/ to gh-pages branch
+      # Option C: S3 / rsync / scp — your choice
+
+      # Committed to a side branch rather than main: it is machine-written every
+      # run, and on main it would bury real commits and retrigger workflows.
+      # Beyond keeping metrics that outlive the Actions cache, the commit itself
+      # keeps the repository active enough that GitHub does not auto-disable the
+      # schedule after 60 days of no activity.
+      - name: Commit run history
+        # Without a zone configured the pipeline has nothing to append, and a
+        # hard failure here would paint the Actions tab red on a repo that is
+        # merely unconfigured. Skipped rather than failed in that case.
+        if: env.HAS_ZONE == 'true'
+        run: |
+          set -euo pipefail
+          if [ ! -f data/run_history.jsonl ]; then
+            echo "::error::RUN_HISTORY_FAIL: data/run_history.jsonl missing after pipeline"
+            exit 1
+          fi
+          cp data/run_history.jsonl /tmp/run_history.jsonl
+          LINES=$(wc -l < /tmp/run_history.jsonl | tr -d ' ')
+          echo "::notice::Run history file present (${LINES} line(s)) before commit"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin run-history || true
+          if git show-ref --verify --quiet refs/remotes/origin/run-history; then
+            git checkout run-history
+            git pull --ff-only origin run-history
+          else
+            git checkout -B run-history
+            mkdir -p data
+          fi
+          cp /tmp/run_history.jsonl data/run_history.jsonl
+          git add data/run_history.jsonl
+          if git diff --staged --quiet; then
+            echo "::notice::no new row to append this run"
+            exit 0
+          fi
+          git commit -m "chore(ml): append run history [skip ci]"
+          if ! git push origin run-history; then
+            echo "::error::RUN_HISTORY_FAIL: git push rejected on run-history branch"
+            exit 1
+          fi
+          echo "::notice::RUN_HISTORY_PUSH_OK: run history committed to run-history branch"

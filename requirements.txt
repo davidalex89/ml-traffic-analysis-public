@@ -1,0 +1,27 @@
+# Python dependencies. Four, all used:
+#   requests      collector.py    — Cloudflare GraphQL calls
+#   scikit-learn  predictive.py   — KMeans, silhouette, ARI, StandardScaler
+#   numpy         predictive.py   — quantiles and feature matrices
+#   jinja2        dashboard_v2.py — HTML template rendering
+#
+# pandas was declared here but imported nowhere; removed rather than left as a
+# 60 MB install nobody needs.
+#
+# ── One dependency is NOT installable from this file ──────────────────────────
+# Chart.js (MIT) renders the charts in the browser. It is a JavaScript library,
+# so pip cannot install it and it has no place in this list — but it is a real
+# requirement, and this is where people look first.
+#
+#   python vendor_chartjs.py      fetches it into lib/
+#
+# The version is pinned as CHART_JS_VERSION in that script. Upstream:
+# https://github.com/chartjs/Chart.js
+#
+# lib/ is gitignored: the bundle is fetched at setup rather than committed, so
+# the upstream project stays the source of truth. Without it the dashboard still
+# renders and the tables are still readable — each chart is replaced by a note.
+
+requests>=2.31.0
+scikit-learn>=1.3.0
+numpy>=1.24.0
+jinja2>=3.1.0

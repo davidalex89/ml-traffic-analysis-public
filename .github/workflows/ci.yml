@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch Chart.js
+        # Not committed — lib/ is gitignored and upstream is the source of
+        # truth. Without this the render below still succeeds but the page
+        # references a chart bundle that is not there.
+        run: python vendor_chartjs.py
+
+      - name: Syntax check
+        run: python -m py_compile *.py
+
+      - name: Import graph resolves
+        # Catches a module deleted or renamed without its importers being
+        # updated — the failure mode that a syntax check alone sails past.
+        run: |
+          python - <<'PY'
+          import importlib
+          for m in ["config", "storage", "collector", "run_clock", "provenance",
+                    "predictive", "dashboard_v2", "pipeline_v2", "run",
+                    "seed_demo_db"]:
+              importlib.import_module(m)
+              print(f"ok  {m}")
+          PY
+
+      - name: Renderer smoke test
+        # Runs the real renderer against a seeded database so a template break
+        # is caught here rather than in production. Seeded rather than live:
+        # CI has no Cloudflare credentials, and pipeline_v2 returns early
+        # without writing output when there is no traffic to analyse.
+        env:
+          DASHBOARD_SITE_URL: https://example.com
+          DASHBOARD_SITE_NAME: example.com
+        run: |
+          python seed_demo_db.py
+          python run.py dashboard
+          test -f output/index.html
+          test -f output/dashboard.css
+          test -f output/dashboard.js
+          echo "rendered $(wc -c < output/index.html) bytes"
+
+      - name: Rendered identity comes from config
+        # Asserted positively rather than as a denylist of known hostnames: a
+        # denylist only catches names someone thought to add, and would bake
+        # those names into this file. The build above set every DASHBOARD_SITE_*
+        # to example.com, so anything else in the title or back-link is a literal
+        # that escaped configuration.
+        run: |
+          python - <<'PY'
+          import re, sys
+          html = open("output/index.html", encoding="utf-8").read()
+          title = re.search(r"<title>(.*?)</title>", html, re.S)
+          back = re.search(r'<a href="([^"]*)" class="back-link"', html)
+          ok = True
+          for label, got in (("title", title.group(1) if title else ""),
+                             ("back-link", back.group(1) if back else "")):
+              if "example.com" not in got:
+                  print(f"::error::{label} is {got!r}, expected the configured "
+                        f"example.com — identity is hardcoded somewhere")
+                  ok = False
+              else:
+                  print(f"ok  {label}: {got.strip()}")
+          sys.exit(0 if ok else 1)
+          PY
