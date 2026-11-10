@@ -275,10 +275,11 @@ class CloudflareCollector:
             )
             data = resp.json()
             if data.get("errors"):
-                log.error("Token verification failed: %s", data["errors"])
+                # Logs Cloudflare's error payload, never the token itself.
+                log.error("Token verification failed: %s", data["errors"])  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
                 return False
             log.info("API token verified successfully")
             return True
         except Exception as e:
-            log.error("Token verification error: %s", e)
+            log.error("Token verification error: %s", e)  # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
             return False

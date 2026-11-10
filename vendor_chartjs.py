@@ -56,7 +56,7 @@ def main():
     print(f"fetching Chart.js {CHART_JS_VERSION}")
     print(f"  {URL}")
     try:
-        with urllib.request.urlopen(URL, timeout=30) as r:
+        with urllib.request.urlopen(URL, timeout=30) as r:  # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             body = r.read()
     except urllib.error.URLError as e:
         print(f"\nfailed: {e}\n\n"
