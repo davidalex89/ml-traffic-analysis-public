@@ -188,7 +188,8 @@ def migrate_run_facts(conn):
     }
     for col, typ in coltypes.items():
         if col not in existing:
-            conn.execute(f"ALTER TABLE run_facts ADD COLUMN {col} {typ}")
+            # Column names and types come from the dict above, not from input.
+            conn.execute(f"ALTER TABLE run_facts ADD COLUMN {col} {typ}")  # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
 
 
 def insert_run_facts(conn, facts: dict):
