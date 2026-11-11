@@ -35,7 +35,9 @@ CREATE TABLE IF NOT EXISTS firewall_events (
     user_agent TEXT,
     rule_id TEXT,
     source TEXT,
-    ray_name TEXT UNIQUE
+    ray_name TEXT UNIQUE,
+    client_asn TEXT,
+    client_asn_name TEXT
 );
 
 CREATE TABLE IF NOT EXISTS ml_results (
@@ -93,6 +95,7 @@ def init_db():
     with get_db() as conn:
         conn.executescript(SCHEMA)
         migrate_run_facts(conn)
+        migrate_firewall_events(conn)
         _deduplicate_hourly_traffic(conn)
 
 
@@ -140,9 +143,11 @@ def insert_firewall_events(conn, rows: list[dict]):
     conn.executemany(
         """INSERT OR IGNORE INTO firewall_events
            (collected_at, event_datetime, action, client_ip, country,
-            host, http_method, request_path, user_agent, rule_id, source, ray_name)
+            host, http_method, request_path, user_agent, rule_id, source, ray_name,
+            client_asn, client_asn_name)
            VALUES (:collected_at, :event_datetime, :action, :client_ip, :country,
-                   :host, :http_method, :request_path, :user_agent, :rule_id, :source, :ray_name)
+                   :host, :http_method, :request_path, :user_agent, :rule_id, :source, :ray_name,
+                   :client_asn, :client_asn_name)
         """,
         rows,
     )
@@ -190,6 +195,22 @@ def migrate_run_facts(conn):
         if col not in existing:
             # Column names and types come from the dict above, not from input.
             conn.execute(f"ALTER TABLE run_facts ADD COLUMN {col} {typ}")  # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
+
+
+def migrate_firewall_events(conn):
+    """Add the two network columns to a firewall_events table from before they shipped.
+
+    Same situation as migrate_run_facts: the production database is restored from
+    an older revision's artifact, so CREATE TABLE IF NOT EXISTS leaves the old
+    table as it was. Rows collected before this ran keep NULL in both columns;
+    anything reading them has to treat NULL as "network unknown", not as a value.
+    """
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(firewall_events)")}
+    if not existing:
+        return
+    for col in ("client_asn", "client_asn_name"):
+        if col not in existing:
+            conn.execute(f"ALTER TABLE firewall_events ADD COLUMN {col} TEXT")
 
 
 def insert_run_facts(conn, facts: dict):

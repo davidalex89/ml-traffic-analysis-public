@@ -219,6 +219,8 @@ class CloudflareCollector:
                 ruleId
                 source
                 rayName
+                clientAsn
+                clientASNDescription
               }
             }
           }
@@ -254,6 +256,10 @@ class CloudflareCollector:
                 "rule_id": evt.get("ruleId", ""),
                 "source": evt.get("source", ""),
                 "ray_name": evt.get("rayName", ""),
+                # Network of the client, as Cloudflare saw it. Stored as text: the
+                # API returns the number as a string and nothing does arithmetic on it.
+                "client_asn": str(evt.get("clientAsn") or ""),
+                "client_asn_name": evt.get("clientASNDescription") or "",
             })
 
         log.info("Collected %d firewall events", len(rows))

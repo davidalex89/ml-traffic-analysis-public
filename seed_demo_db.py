@@ -36,6 +36,8 @@ DAYS = 21
 SEED = 20260816
 
 COUNTRIES = ["US", "DE", "CN", "GB", "NL", "SG", "BR", "FR"]
+NETWORKS = (("14618", "Amazon.com, Inc."), ("16509", "Amazon.com, Inc."), ("8075", "Microsoft Corporation"),
+            ("15169", "Google LLC"), ("132203", "Tencent Building, Kejizhongyi Avenue"), ("", ""))
 METHODS = ["GET", "GET", "GET", "POST", "HEAD"]
 STATUSES = [200, 200, 200, 301, 404, 403, 503]
 
@@ -118,6 +120,9 @@ def build(days=DAYS, seed=SEED):
                 "rule_id": rng.choice(["bot_fight_mode", "waf", "e" * 8 + f"{i:024d}"]),
                 "source": rng.choice(["firewallCustom", "botFight", "waf"]),
                 "ray_name": f"seed{h:05d}{i:03d}",
+                # Network as Cloudflare reports it. The empty pair is the shape of
+                # events collected before these columns existed.
+                **dict(zip(("client_asn", "client_asn_name"), rng.choice(NETWORKS))),
             })
 
     return hourly, events
