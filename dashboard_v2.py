@@ -15,6 +15,7 @@ import logging
 import re
 import shutil
 from datetime import timedelta
+from html import unescape
 from pathlib import Path
 
 from jinja2 import Template
@@ -760,6 +761,10 @@ def _prose_blocks(html_text):
 
     Captions, methodology paragraphs and empty states. These describe what was
     measured and how; they do not interpret it.
+
+    Returned as a reader sees them. The template autoescapes, so an apostrophe
+    in a value reaches the HTML as &#39;. Read raw, the gate would see that 39
+    as a number in the prose. Character references are decoded first.
     """
     blocks = {}
     for m in re.finditer(r'<p class="(cap)">(.*?)</p>', html_text, re.S):
@@ -770,7 +775,7 @@ def _prose_blocks(html_text):
             blocks[f"method#{i}"] = para
     for m in re.finditer(r'<div class="empty">(.*?)</div>', html_text, re.S):
         blocks[f"empty#{len(blocks)}"] = m.group(1)
-    return blocks
+    return {name: unescape(text) for name, text in blocks.items()}
 
 
 def _assert_number_provenance(html_text, facts):
