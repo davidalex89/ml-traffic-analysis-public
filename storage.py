@@ -208,9 +208,14 @@ def migrate_firewall_events(conn):
     existing = {r[1] for r in conn.execute("PRAGMA table_info(firewall_events)")}
     if not existing:
         return
-    for col in ("client_asn", "client_asn_name"):
+    # Spelled out rather than formatted: two statements, no string building.
+    statements = {
+        "client_asn": "ALTER TABLE firewall_events ADD COLUMN client_asn TEXT",
+        "client_asn_name": "ALTER TABLE firewall_events ADD COLUMN client_asn_name TEXT",
+    }
+    for col, sql in statements.items():
         if col not in existing:
-            conn.execute(f"ALTER TABLE firewall_events ADD COLUMN {col} TEXT")
+            conn.execute(sql)
 
 
 def insert_run_facts(conn, facts: dict):
