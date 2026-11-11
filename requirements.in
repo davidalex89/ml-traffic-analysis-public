@@ -33,3 +33,7 @@ requests
 scikit-learn
 numpy
 jinja2
+
+# CANARY: do not merge. Pinned to a version with a known high-severity CVE
+# to prove dependency review blocks the PR.
+urllib3==1.26.4

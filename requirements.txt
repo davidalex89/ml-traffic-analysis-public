@@ -538,7 +538,9 @@ threadpoolctl==3.8.0 \
     --hash=sha256:01080674ad7ac6182429c918a79de92da789bb448acc02fc0b620b1abd6b6137 \
     --hash=sha256:f1b49c82704d50f13ffae019c727b0fa4f6791a58f48f06a09c45face1be66da
     # via scikit-learn
-urllib3==2.8.0 \
-    --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3 \
-    --hash=sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63
-    # via requests
+urllib3==1.26.4 \
+    --hash=sha256:2f4da4594db7e1e110a944bb1b551fdf4e6c136ad42e4234131391e21eb5b0df \
+    --hash=sha256:e7b021f7241115872f92f43c6508082facffbd1c048e3c6e2bb9c2a157e28937
+    # via
+    #   -r requirements.in
+    #   requests
