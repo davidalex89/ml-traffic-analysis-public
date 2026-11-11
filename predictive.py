@@ -270,18 +270,6 @@ def run_backtest(conn, days=30, include_ml=True):
         return {"available": False}
     last = series[-1][0]
     start = last - timedelta(days=days)
-    idx = {dt: i for i, (dt, _, _) in enumerate(series)}
-
-    def window_before(i, d):
-        cutoff = series[i][0] - timedelta(days=d)
-        return [v for dt, v, _ in series[:i] if dt >= cutoff]
-
-    cands = {
-        "Rolling median, 14d": lambda i: st.median(window_before(i, 14)) if window_before(i, 14) else None,
-        "Hour-of-day median": None,
-        "Hour x day-of-week median": None,
-        "Naive (previous hour)": lambda i: series[i - 1][1] if i else None,
-    }
     errs = defaultdict(list)
     for i, (dt, actual, _) in enumerate(series):
         if dt < start or i < 24 * 14:
@@ -392,6 +380,8 @@ def build_archetypes(conn):
         try:
             e["times"].append(datetime.strptime(r["event_datetime"][:19], "%Y-%m-%dT%H:%M:%S"))
         except (ValueError, TypeError):
+            # A malformed or missing timestamp costs this event its place in the
+            # temporal-span feature; the IP keeps its count and path features.
             pass
 
     ips, feats, meta = [], [], []
