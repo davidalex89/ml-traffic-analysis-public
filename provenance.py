@@ -50,7 +50,7 @@ def _walk(obj, acc):
     if isinstance(obj, str):
         for tok in re.findall(r"-?\d[\d,]*\.?\d*", obj):
             try: _walk(float(tok.replace(",", "")), acc)
-            except ValueError: pass
+            except ValueError: pass  # regex over-matched (e.g. "1.2.3"); not a number, skip
         return acc
     if isinstance(obj, dict):
         for k, v in obj.items():

@@ -807,7 +807,10 @@ def render(*, expectation, calibration, backtest, archetypes, run_series,
                          separators=(",", ":"), default=str)
     cache_bust = run_clock.now().strftime("%Y%m%d%H%M")
 
-    html = Template(TEMPLATE).render(
+    # Every value the template prints is a number, a fixed label, or a string
+    # this pipeline produced; none is marked safe. Escaping is defence in depth
+    # for the day one of them starts carrying something a client sent.
+    html = Template(TEMPLATE, autoescape=True).render(
         expectation=expectation, calibration=calibration, backtest=backtest,
         archetypes=archetypes, run_series=run_series, sparks=sparks,
         median_hour=median_hour, payload=payload, cache_bust=cache_bust, params=_params(),
