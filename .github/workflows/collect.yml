@@ -35,12 +35,12 @@ jobs:
       HAS_ZONE: ${{ secrets.CF_ZONE_ID != '' && secrets.CF_API_TOKEN != '' }}
     steps:
       # Credentials stay on the checkout: the run-history commit below pushes with them.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6 # zizmor: ignore[artipacked]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install dependencies
         run: pip install -r requirements.txt

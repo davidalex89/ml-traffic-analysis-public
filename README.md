@@ -42,6 +42,8 @@ your data, on every run.
 
 ## Try it without a Cloudflare account
 
+Python 3.12 or newer.
+
 ```bash
 pip install -r requirements.txt
 python vendor_chartjs.py   # fetches Chart.js into lib/ (not committed)
