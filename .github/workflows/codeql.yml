@@ -3,6 +3,11 @@ name: CodeQL
 # Advanced setup, replacing GitHub's default setup so the query suite and
 # scanned paths are chosen here. security-and-quality is a superset of the
 # security-extended suite: the same security queries plus code-quality ones.
+#
+# The "CodeQL" check the ruleset requires is not a job here. GitHub's code
+# scanning app posts it after the results upload, and it is the only check
+# that fails on findings: the Analyze jobs below succeed whenever analysis
+# completes, whatever it finds.
 
 on:
   pull_request:
@@ -44,13 +49,3 @@ jobs:
         with:
           category: /language:${{ matrix.language }}
 
-  # One check for the ruleset to require. The matrix above produces one check
-  # per language; this collapses them so the required check stays "CodeQL".
-  CodeQL:
-    needs: analyze
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - env:
-          RESULT: ${{ needs.analyze.result }}
-        run: test "$RESULT" = "success"
